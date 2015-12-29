@@ -91,7 +91,11 @@ uint32_t rcInvalidPulsPeriod[MAX_SUPPORTED_RC_CHANNEL_COUNT];
 #define DELAY_5_HZ (1000000 / 5)
 #define SKIP_RC_ON_SUSPEND_PERIOD 1500000           // 1.5 second period in usec (call frequency independent)
 #define SKIP_RC_SAMPLES_ON_RESUME  2                // flush 2 samples to drop wrong measurements (timing independent)
-#define MAX_ALLOWED_RX_CHANNELS 8                   // Max allowed channels. Performance boost for serial rx
+#ifdef STM32F303xC
+#define MAX_RC_CHANNELS_HIGH_PERFORMANCE 10         // Maximum channels allowed during fast refresh rates for more performance
+#else
+#define MAX_RC_CHANNELS_HIGH_PERFORMANCE 8          // Maximum channels allowed during fast refresh rates for more performance
+#endif
 
 rxRuntimeConfig_t rxRuntimeConfig;
 static rxConfig_t *rxConfig;
@@ -440,11 +444,24 @@ STATIC_UNIT_TESTED uint16_t applyRxChannelRangeConfiguraton(int sample, rxChanne
     return sample;
 }
 
+static uint8_t getRxChannelCount(void) {
+    static uint8_t maxChannelsAllowed;
+
+    if (!maxChannelsAllowed) {
+        if (targetLooptime < 1000) {
+            maxChannelsAllowed = MAX_RC_CHANNELS_HIGH_PERFORMANCE;
+        } else {
+            maxChannelsAllowed = rxRuntimeConfig.channelCount;
+        }
+    }
+    return maxChannelsAllowed;
+}
+
 static void readRxChannelsApplyRanges(void)
 {
     uint8_t channel;
 
-    for (channel = 0; channel < MAX_ALLOWED_RX_CHANNELS; channel++) {
+    for (channel = 0; channel < getRxChannelCount(); channel++) {
 
         uint8_t rawChannel = calculateChannelRemapping(rxConfig->rcmap, REMAPPABLE_CHANNEL_COUNT, channel);
 
@@ -485,7 +502,7 @@ static void detectAndApplySignalLossBehaviour(void)
 
     rxResetFlightChannelStatus();
 
-    for (channel = 0; channel < MAX_ALLOWED_RX_CHANNELS; channel++) {
+    for (channel = 0; channel < getRxChannelCount(); channel++) {
 
         sample = (useValueFromRx) ? rcRaw[channel] : PPM_RCVR_TIMEOUT;
 
@@ -517,7 +534,7 @@ static void detectAndApplySignalLossBehaviour(void)
         rxIsInFailsafeMode = rxIsInFailsafeModeNotDataDriven = true;
         failsafeOnValidDataFailed();
 
-        for (channel = 0; channel < MAX_ALLOWED_RX_CHANNELS; channel++) {
+        for (channel = 0; channel < getRxChannelCount(); channel++) {
             rcData[channel] = getRxfailValue(channel);
         }
     }
