@@ -181,7 +181,7 @@ static void pidLuxFloat(pidProfile_t *pidProfile, controlRateConfig_t *controlRa
         }
 
         // -----calculate I component.
-        errorGyroIf[axis] = constrainf(errorGyroIf[axis] + 0.5f * (lastError[axis] + RateError) * dT * pidProfile->I_f[axis] * 10, -250.0f, 250.0f);
+        errorGyroIf[axis] = constrainf(errorGyroIf[axis] + RateError * dT * pidProfile->I_f[axis] * 10, -250.0f, 250.0f);
 
         if (allowITermShrinkOnly || motorLimitReached) {
             if (ABS(errorGyroIf[axis]) < ABS(previousErrorGyroIf[axis])) {
@@ -205,15 +205,15 @@ static void pidLuxFloat(pidProfile_t *pidProfile, controlRateConfig_t *controlRa
         // would be scaled by different dt each time. Division by dT fixes that.
         delta *= (1.0f / dT);
 
-        // Apply moving average
-       for (deltaCount = deltaTotalSamples-1; deltaCount > 0; deltaCount--) previousDelta[axis][deltaCount] = previousDelta[axis][deltaCount-1];
-       previousDelta[axis][0] = delta;
-       for (deltaCount = 0; deltaCount < deltaTotalSamples; deltaCount++) deltaSum += previousDelta[axis][deltaCount];
-       deltaSum = (deltaSum / deltaTotalSamples);
-
         if (pidProfile->dterm_cut_hz) {
             // Dterm low pass
             deltaSum = filterApplyPt1(delta, &DTermState[axis], pidProfile->dterm_cut_hz, dT);
+        } else {
+            // Apply moving average
+            for (deltaCount = deltaTotalSamples-1; deltaCount > 0; deltaCount--) previousDelta[axis][deltaCount] = previousDelta[axis][deltaCount-1];
+            previousDelta[axis][0] = delta;
+            for (deltaCount = 0; deltaCount < deltaTotalSamples; deltaCount++) deltaSum += previousDelta[axis][deltaCount];
+            deltaSum = (deltaSum / deltaTotalSamples);
         }
 
         DTerm = constrainf(deltaSum * pidProfile->D_f[axis] * PIDweight[axis] / 100, -300.0f, 300.0f);
@@ -321,7 +321,7 @@ static void pidRewrite(pidProfile_t *pidProfile, controlRateConfig_t *controlRat
         // Precision is critical, as I prevents from long-time drift. Thus, 32 bits integrator is used.
         // Time correction (to avoid different I scaling for different builds based on average cycle time)
         // is normalized to cycle time = 2048.
-        errorGyroI[axis] = errorGyroI[axis] + ((((lastError[axis] + RateError) / 2) * (uint16_t)targetLooptime) >> 11) * pidProfile->I8[axis];
+        errorGyroI[axis] = errorGyroI[axis] + ((RateError * (uint16_t)targetLooptime) >> 11) * pidProfile->I8[axis];
 
         // limit maximum integrator value to prevent WindUp - accumulating extreme values when system is saturated.
         // I coefficient (I8) moved before integration to make limiting independent from PID settings
@@ -347,15 +347,15 @@ static void pidRewrite(pidProfile_t *pidProfile, controlRateConfig_t *controlRat
         // would be scaled by different dt each time. Division by dT fixes that.
         delta = (delta * ((uint16_t) 0xFFFF / ((uint16_t)targetLooptime >> 4))) >> 6;
 
-        // Apply moving average
-       for (deltaCount = deltaTotalSamples-1; deltaCount > 0; deltaCount--) previousDelta[axis][deltaCount] = previousDelta[axis][deltaCount-1];
-       previousDelta[axis][0] = delta;
-       for (deltaCount = 0; deltaCount < deltaTotalSamples; deltaCount++) deltaSum += previousDelta[axis][deltaCount];
-       deltaSum = (deltaSum / deltaTotalSamples) * 3; // get old scaling by multiplying with 3
-
         if (pidProfile->dterm_cut_hz) {
             // Dterm delta low pass
-            deltaSum = filterApplyPt1(deltaSum, &DTermState[axis], pidProfile->dterm_cut_hz, dT);
+            deltaSum = filterApplyPt1(delta, &DTermState[axis], pidProfile->dterm_cut_hz, dT);
+        } else {
+            // Apply moving average
+            for (deltaCount = deltaTotalSamples-1; deltaCount > 0; deltaCount--) previousDelta[axis][deltaCount] = previousDelta[axis][deltaCount-1];
+            previousDelta[axis][0] = delta;
+            for (deltaCount = 0; deltaCount < deltaTotalSamples; deltaCount++) deltaSum += previousDelta[axis][deltaCount];
+            deltaSum = (deltaSum / deltaTotalSamples) * 3; // get old scaling by multiplying with 3
         }
 
         DTerm = (deltaSum * pidProfile->D8[axis] * PIDweight[axis] / 100) >> 8;
